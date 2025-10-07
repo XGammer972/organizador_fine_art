@@ -1,0 +1,8 @@
+streamlit
+pillow
+numpy
+scikit-learn
+colorgram.py
+opencv-python
+reportlab
+fpdf
