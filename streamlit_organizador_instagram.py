@@ -395,9 +395,9 @@ if st.session_state.get("ordered"):
                                 pil_img = Image.open(io.BytesIO(item["bytes"])) if item.get("bytes") else Image.new("RGB", (300,300),(240,240,240))
                             # reducir antes de guardar
                             im_copy = pil_img.copy()
-                            im_copy.thumbnail((int(cell_w*10), int(cell_h*10)))
+                            im_copy.thumbnail((800, 800))
                             tmp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-                            im_copy.save(tmp_img.name, "JPEG", quality=70)
+                            im_copy.save(tmp_img.name, "JPEG", quality=60, optimize=True, progressive=True )
                             # draw image
                             pdf.image(tmp_img.name, x_mm, page_h - y_mm - cell_h, w=cell_w, h=cell_h)
                             # draw color bar under it if exists
@@ -453,4 +453,5 @@ else:
 # ---------------------------
 # FIN
 # ---------------------------
+
 
