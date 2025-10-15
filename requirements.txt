@@ -3,10 +3,12 @@ streamlit==1.50.0          # interfaz web interactiva
 pillow==11.3.0             # manejo de imágenes (PIL)
 numpy==2.3.3               # cálculos numéricos (luminosidad, medias de color)
 scikit-learn==1.7.2        # clustering y cálculos cromáticos
-opencv-python==4.11.0.86   # conversión de espacios de color (RGB↔LAB)
+opencv-python-headless==4.11.0.86
+                                   # conversión de espacios de color (RGB↔LAB)
 colorgram.py==1.2.0        # extracción de paletas dominantes
 fpdf==1.7.2                # generación de PDF (feed 3x3)
 reportlab==4.4.4           # soporte alternativo de PDF (usado en versiones previas)
 
 # --- Dependencias complementarias ---
 typing-extensions>=4.10.0  # requerido por streamlit/numpy recientes
+
