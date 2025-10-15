@@ -1,167 +1,184 @@
+# ===============================================================
+# 🖼️ ORGANIZADOR FINE ART PARA INSTAGRAM
+# Autor: Naim + ChatGPT
+# Versión optimizada (RAM reducida, caching, PDF opcional)
+# ===============================================================
+
 import streamlit as st
+from PIL import Image
 import numpy as np
-from PIL import Image, ImageDraw
-import colorgram
 import io
-from fpdf import FPDF
+import colorgram
+from sklearn.cluster import KMeans
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+import tempfile
+import os
 
-# =====================================
-# ⚙️ CONFIGURACIÓN INICIAL DE LA APP
-# =====================================
-st.set_page_config(page_title="🎨 Organizador Fine Art", layout="wide")
-st.title("🎨 Organizador Fine Art por Color y Luminosidad")
-st.write("Ajustá los parámetros, subí tus fotos y obtené una organización estética por gradiente de color y luz.")
+# ===============================================================
+# 🧠 CONFIGURACIÓN INICIAL
+# ===============================================================
 
-# =====================================
-# 🎚️ PANEL LATERAL DE CONTROLES
-# =====================================
-st.sidebar.header("⚙️ Ajustes del Organizador")
+# Evita advertencias de Pillow con imágenes grandes
+Image.MAX_IMAGE_PIXELS = 20000000
 
-# Parámetros de análisis
-num_clusters = st.sidebar.slider("Número de clusters (para agrupar tonos)", 2, 10, 4)
-reduccion = st.sidebar.slider("Reducción de tamaño para análisis", 100, 1000, 300)
-peso_color = st.sidebar.slider("Peso del color 🎨", 0.0, 1.0, 0.5)
-peso_luz = st.sidebar.slider("Peso de la luminosidad 💡", 0.0, 1.0, 0.5)
-umbral_color = st.sidebar.slider("Nivel de similitud de color", 10, 300, 100)
+st.set_page_config(page_title="Organizador Fine Art", layout="wide")
 
-# Modo general
-modo = st.sidebar.selectbox(
-    "Modo de organización inicial",
-    ["Luminosidad primero", "Color primero", "Mixto (ambos equilibrados)"]
+st.title("🎨 Organizador Estético para Instagram")
+st.write("Subí tus fotos y ajustá los parámetros para ordenarlas por **color y luminosidad** de manera armoniosa.")
+
+# ===============================================================
+# ⚙️ PANEL DE SLIDERS (visible desde el inicio)
+# ===============================================================
+
+st.sidebar.header("Ajustes de organización")
+
+# Parámetros ajustables por el usuario
+num_clusters = st.sidebar.slider("Número de clusters de color", 2, 10, 4)
+reduccion = st.sidebar.slider("Tamaño de reducción para análisis", 200, 800, 400, step=100)
+peso_color = st.sidebar.slider("Peso del color", 0.0, 1.0, 0.5, step=0.1)
+peso_luminosidad = st.sidebar.slider("Peso de la luminosidad", 0.0, 1.0, 0.5, step=0.1)
+modo_bn = st.sidebar.checkbox("🔲 Usar blanco y negro para suavizar gradiente", value=False)
+
+# ===============================================================
+# 📤 SUBIDA DE ARCHIVOS
+# ===============================================================
+
+uploaded_files = st.file_uploader(
+    "Subí tus fotos (máximo 150 MB en total)", 
+    accept_multiple_files=True, 
+    type=["png", "jpg", "jpeg"]
 )
 
-# =====================================
-# 🧩 FUNCIONES AUXILIARES
-# =====================================
+# ===============================================================
+# 🔧 FUNCIONES CON CACHE Y OPTIMIZACIONES DE MEMORIA
+# ===============================================================
 
+@st.cache_data
 def calcular_luminosidad(img):
-    """Calcula la luminosidad promedio de la imagen."""
-    img = img.convert("RGB")
-    np_img = np.array(img.resize((reduccion, reduccion)))
-    r, g, b = np_img[:,:,0], np_img[:,:,1], np_img[:,:,2]
-    luminancia = 0.2126*r + 0.7152*g + 0.0722*b
-    return np.mean(luminancia)
+    """Convierte a escala de grises y obtiene promedio de luminosidad."""
+    if img.mode != "L":
+        img = img.convert("L")
+    return np.mean(np.array(img))
 
+@st.cache_data
 def obtener_colores_dominantes(img, cantidad=3):
-    """Extrae los colores dominantes con colorgram."""
+    """Extrae colores dominantes usando colorgram (ya optimizado)."""
     colores = colorgram.extract(img, cantidad)
     return [(c.rgb.r, c.rgb.g, c.rgb.b) for c in colores]
 
-def similitud_paleta(p1, p2):
-    """Distancia promedio entre dos paletas RGB."""
-    if not p1 or not p2:
-        return float("inf")
-    distancias = [np.linalg.norm(np.array(c1)-np.array(c2)) for c1 in p1 for c2 in p2]
-    return np.mean(distancias)
+def reducir_imagen(img, max_size=(800, 800)):
+    """
+    Reduce el tamaño de la imagen antes de procesarla para ahorrar memoria.
+    Se usa 'draft' + 'thumbnail' (no deforma la imagen).
+    """
+    img.draft("RGB", max_size)
+    img = img.convert("RGB")
+    img.thumbnail(max_size)
+    return img
 
-def organizar_por_luminosidad(lista_imgs):
-    """Ordena por luminosidad."""
-    return sorted(lista_imgs, key=lambda x: x["luminosidad"])
-
-def agrupar_por_color(lista_imgs, umbral):
-    """Agrupa por similitud de paleta."""
-    agrupadas = [lista_imgs[0]]
-    for img in lista_imgs[1:]:
-        ultima = agrupadas[-1]
-        dist = similitud_paleta(ultima["colores"], img["colores"])
-        if dist < umbral:
-            agrupadas.append(img)
-        else:
-            agrupadas.append(img)
-    return agrupadas
-
-def crear_barra_colores(colores, ancho=300, alto=40):
-    """Crea una barra visual de colores dominantes."""
-    barra = Image.new("RGB", (ancho, alto))
-    draw = ImageDraw.Draw(barra)
-    ancho_color = ancho // len(colores)
-    for i, c in enumerate(colores):
-        draw.rectangle([i*ancho_color, 0, (i+1)*ancho_color, alto], fill=c)
-    return barra
-
-def crear_pdf(imagenes):
-    """Genera PDF con las fotos organizadas."""
-    pdf = FPDF()
-    for img_info in imagenes:
-        img = img_info["imagen"].resize((600, 600))
-        temp = io.BytesIO()
-        img.save(temp, format="JPEG")
-        pdf.add_page()
-        pdf.image(temp, x=10, y=10, w=180)
-    buffer = io.BytesIO()
-    pdf.output(buffer)
-    buffer.seek(0)
-    return buffer
-
-# =====================================
-# 📂 SUBIDA DE ARCHIVOS
-# =====================================
-uploaded_files = st.file_uploader("📸 Subí tus fotos (JPG o PNG)", accept_multiple_files=True, type=["jpg", "jpeg", "png"])
-
-# =====================================
+# ===============================================================
 # 🔄 PROCESAMIENTO PRINCIPAL
-# =====================================
+# ===============================================================
+
 if uploaded_files:
-    st.success(f"Se subieron {len(uploaded_files)} fotos correctamente ✅")
-    fotos_data = []
+    st.write("📸 **Procesando tus imágenes...** Esto puede tardar unos segundos.")
+    
+    imagenes_info = []
 
     for file in uploaded_files:
-        img = Image.open(file)
-        # Reducimos tamaño temporal para optimizar recursos
-        img_reducida = img.resize((reduccion, reduccion))
-        luminosidad = calcular_luminosidad(img_reducida)
-        colores = obtener_colores_dominantes(img_reducida, cantidad=num_clusters)
-        fotos_data.append({
-            "nombre": file.name,
-            "imagen": img,
-            "luminosidad": luminosidad,
-            "colores": colores
-        })
+        try:
+            img = Image.open(file)
 
-    # Botón para ejecutar la organización
-    if st.button("🪄 Organizar según configuración"):
-        st.info(f"Procesando con modo '{modo}'...")
+            # ⚙️ Reducción temprana para ahorrar RAM
+            img = reducir_imagen(img, (reduccion, reduccion))
 
-        # Modo luminosidad primero
-        if modo == "Luminosidad primero":
-            fotos_data = organizar_por_luminosidad(fotos_data)
-            fotos_data = agrupar_por_color(fotos_data, umbral_color)
+            # Si se seleccionó el modo blanco y negro
+            img_proc = img.convert("L") if modo_bn else img
 
-        # Modo color primero
-        elif modo == "Color primero":
-            fotos_data.sort(key=lambda x: np.mean([np.mean(c) for c in x["colores"]]))
-            fotos_data = agrupar_por_color(fotos_data, umbral_color)
+            # 🧮 Cálculo de luminosidad y colores dominantes
+            lum = calcular_luminosidad(img_proc)
+            colores = obtener_colores_dominantes(img_proc, num_clusters)
 
-        # Modo mixto: equilibrio entre color y luminosidad
-        else:
-            fotos_data.sort(key=lambda x: x["luminosidad"] * peso_luz + np.mean([np.mean(c) for c in x["colores"]]) * peso_color)
-            fotos_data = agrupar_por_color(fotos_data, umbral_color)
+            # Guardamos la información para ordenar después
+            imagenes_info.append((file.name, img, lum, colores))
 
-        st.session_state["fotos_final"] = fotos_data
-        st.success("✅ Organización completada.")
+            # 🧠 Libera memoria de la imagen procesada
+            del img_proc
 
-    # =====================================
-    # 👀 VISTA PREVIA
-    # =====================================
-    if "fotos_final" in st.session_state:
-        st.subheader("🔍 Vista previa del orden final")
+        except Exception as e:
+            st.error(f"Error al procesar {file.name}: {e}")
 
-        cols = st.columns(5)
-        for i, foto in enumerate(st.session_state["fotos_final"]):
-            with cols[i % 5]:
-                st.image(foto["imagen"], caption=foto["nombre"], use_container_width=True)
-                barra = crear_barra_colores(foto["colores"])
-                st.image(barra, use_container_width=True)
+    # ===============================================================
+    # 🎨 ORGANIZACIÓN DE LAS IMÁGENES
+    # ===============================================================
 
-        # Generar PDF
-        if st.button("📄 Generar PDF final"):
-            pdf_bytes = crear_pdf(st.session_state["fotos_final"])
-            st.download_button(
-                label="⬇️ Descargar PDF organizado",
-                data=pdf_bytes,
-                file_name="organizacion_fine_art.pdf",
-                mime="application/pdf"
-            )
+    if imagenes_info:
+        st.write("🔢 **Organizando según parámetros seleccionados...**")
+
+        # Calculamos el color medio ponderado de cada imagen
+        datos_orden = []
+        for nombre, img, lum, colores in imagenes_info:
+            if len(colores) > 0:
+                color_medio = np.mean(colores, axis=0)
+                valor_orden = (
+                    peso_color * np.linalg.norm(color_medio) +
+                    peso_luminosidad * lum
+                )
+                datos_orden.append((nombre, img, valor_orden))
+
+        # Ordena según el valor combinado (color + luminosidad)
+        imagenes_ordenadas = sorted(datos_orden, key=lambda x: x[2])
+
+        # ===============================================================
+        # 🖼️ PREVISUALIZACIÓN EN CUADRÍCULA 3x3 (feed estilo Instagram)
+        # ===============================================================
+
+        st.subheader("🧩 Previsualización del orden final")
+
+        columnas = st.columns(3)
+        for i, (nombre, img, _) in enumerate(imagenes_ordenadas):
+            with columnas[i % 3]:
+                st.image(img, caption=nombre, use_container_width=True)
+
+        # ===============================================================
+        # 📄 GENERAR PDF EN FORMATO FEED
+        # ===============================================================
+
+        if st.button("📥 Generar PDF del orden final"):
+            pdf_path = os.path.join(tempfile.gettempdir(), "feed_instagram.pdf")
+            c = canvas.Canvas(pdf_path, pagesize=A4)
+            ancho, alto = A4
+            margen = 30
+            tamaño_img = (ancho - 4 * margen) / 3
+
+            x = margen
+            y = alto - tamaño_img - margen
+            contador = 0
+
+            for _, img, _ in imagenes_ordenadas:
+                # Reducimos la imagen antes de exportar para optimizar PDF
+                img_reducida = img.copy()
+                img_reducida.thumbnail((600, 600))
+                temp_path = os.path.join(tempfile.gettempdir(), "temp_img.jpg")
+                img_reducida.save(temp_path, "JPEG", quality=70)
+                c.drawImage(temp_path, x, y, tamaño_img, tamaño_img)
+
+                x += tamaño_img + margen
+                contador += 1
+
+                # Cada 3 imágenes cambiamos de fila
+                if contador % 3 == 0:
+                    x = margen
+                    y -= tamaño_img + margen
+                    if y < margen:
+                        c.showPage()
+                        y = alto - tamaño_img - margen
+
+            c.save()
+            st.success("✅ PDF generado correctamente.")
+            with open(pdf_path, "rb") as f:
+                st.download_button("⬇️ Descargar PDF", f, file_name="feed_instagram.pdf")
 
 else:
-    st.warning("Subí tus imágenes para comenzar la organización.")
+    st.info("⬆️ Esperando que subas tus imágenes para comenzar...")
