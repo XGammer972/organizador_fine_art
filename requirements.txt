@@ -1,8 +1,7 @@
-streamlit
-pillow
-numpy
-scikit-learn
-colorgram.py
-opencv-python
-reportlab
-fpdf
+streamlit==1.50.0
+pillow==11.3.0
+numpy==2.3.3
+scikit-learn==1.7.2
+opencv-python==4.11.0.86
+colorgram.py==1.2.0
+reportlab==4.4.4
