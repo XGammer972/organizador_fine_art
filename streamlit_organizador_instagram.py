@@ -349,7 +349,7 @@ if st.session_state.get("ordered"):
                 pil_img = item.get("pil") or item.get("pil")
                 caption = item.get("name", f"{idx+1}")
                 with col:
-                    st.image(pil_img, caption=caption, use_column_width=True)
+                    st.image(pil_img, caption=caption, use_container_width=True)
                     # barra de color bajo cada imagen (usamos palette if available)
                     if "palette" in item and item["palette"]:
                         barra = create_color_bar(item["palette"], ancho=300, alto=30)
@@ -453,3 +453,4 @@ else:
 # ---------------------------
 # FIN
 # ---------------------------
+
