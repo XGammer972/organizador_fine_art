@@ -527,6 +527,127 @@ if st.session_state.get("ordered"):
             except Exception as e:
                 logging.exception(f"Error during gradient refinement: {e}")
                 st.error("Error al refinar gradiente. Revisá el log.")
+# ==========================================================
+# 🌈 BLOQUE: SUAVIZADO DE GRADIENTE (ΔE PERCEPTUAL + LOCAL)
+# ==========================================================
+
+# Agregamos slider en la barra lateral (colócalo junto a los otros sliders si querés moverlo)
+suavizado_local = st.sidebar.slider(
+    "🔮 Nivel de suavizado de transición (local)", 
+    0.0, 1.0, 0.4, step=0.05,
+    help="Ajusta la suavidad entre fotos vecinas en la gradiente final (0 = sin suavizar, 1 = transición muy suave)"
+)
+
+# ----------------------------------------------------------
+# Función para suavizar gradiente perceptualmente (ΔE en espacio Lab)
+# ----------------------------------------------------------
+def ordenar_por_gradiente_lab(imagenes):
+    """
+    Ordena las imágenes minimizando saltos de color (ΔE) en espacio Lab.
+    Usa distancia perceptual entre colores dominantes para lograr una transición fluida.
+    """
+    if not imagenes:
+        return []
+
+    # 1️⃣ Convertir cada imagen a Lab (perceptual)
+    labs = []
+    for img in imagenes:
+        if "dominant_rgb" in img:
+            lab = rgb_to_lab_numpy(img["dominant_rgb"])
+        elif "color_mean" in img:
+            lab = rgb_to_lab_numpy(img["color_mean"])
+        else:
+            lab = np.array([0.0, 0.0, 0.0])
+        labs.append(lab)
+
+    # 2️⃣ Empezar con la más oscura (menor L)
+    start_idx = int(np.argmin([l[0] for l in labs]))
+    ordered = [imagenes[start_idx]]
+    used = {start_idx}
+    current_lab = labs[start_idx]
+
+    # 3️⃣ Repetir hasta usar todas: buscar la más cercana (ΔE mínima)
+    for _ in range(len(imagenes) - 1):
+        min_d, min_i = 1e9, None
+        for i, lab in enumerate(labs):
+            if i not in used:
+                d = lab_distance(current_lab, lab)
+                if d < min_d:
+                    min_d, min_i = d, i
+        ordered.append(imagenes[min_i])
+        used.add(min_i)
+        current_lab = labs[min_i]
+
+    return ordered
+
+# ----------------------------------------------------------
+# Función opcional de suavizado local (aplicada luego de ordenar)
+# ----------------------------------------------------------
+def aplicar_suavizado_local(imagenes, nivel):
+    """
+    Promedia parcialmente los colores dominantes entre vecinos.
+    Cuanto mayor el nivel, más se suaviza la gradiente visual (pero puede perder contraste).
+    """
+    if not imagenes or len(imagenes) < 3 or nivel <= 0:
+        return imagenes
+
+    suavizadas = []
+    for i in range(len(imagenes)):
+        # Evitar extremos (mantener primera y última sin mezclar)
+        if i == 0 or i == len(imagenes)-1:
+            suavizadas.append(imagenes[i])
+            continue
+
+        # Mezcla de color entre vecino anterior, actual y siguiente
+        prev = imagenes[i-1]
+        curr = imagenes[i]
+        nxt = imagenes[i+1]
+
+        def get_rgb(it):
+            if "dominant_rgb" in it:
+                return np.array(it["dominant_rgb"], dtype=float)
+            elif "color_mean" in it:
+                return np.array(it["color_mean"], dtype=float)
+            else:
+                return np.array([200, 200, 200], dtype=float)
+
+        rgb_prev, rgb_curr, rgb_next = get_rgb(prev), get_rgb(curr), get_rgb(nxt)
+        # Mezcla ponderada
+        rgb_mix = (
+            rgb_prev * (nivel / 2)
+            + rgb_curr * (1 - nivel)
+            + rgb_next * (nivel / 2)
+        )
+
+        it_new = curr.copy()
+        it_new["dominant_rgb"] = tuple(map(int, rgb_mix))
+        suavizadas.append(it_new)
+
+    return suavizadas
+
+# ----------------------------------------------------------
+# Botón para aplicar el suavizado ΔE + Local
+# ----------------------------------------------------------
+st.markdown("---")
+st.subheader("🌈 Suavizado de gradiente cromática avanzada")
+
+if st.session_state.get("ordered"):
+    if st.button("🌈 Suavizar gradiente (ΔE perceptual + transición local)"):
+        try:
+            ordered_imgs = st.session_state["ordered"]
+            with st.spinner("Calculando secuencia perceptualmente suave..."):
+                # Paso 1: reordenar por distancia perceptual ΔE
+                ordered_imgs = ordenar_por_gradiente_lab(ordered_imgs)
+                # Paso 2: aplicar suavizado local si el slider > 0
+                ordered_imgs = aplicar_suavizado_local(ordered_imgs, suavizado_local)
+                # Paso 3: guardar en sesión
+                st.session_state["ordered"] = ordered_imgs
+            st.success("✅ Gradiente suavizada y refinada con éxito.")
+        except Exception as e:
+            logging.exception(f"Error al suavizar gradiente: {e}")
+            st.error("❌ Error durante el suavizado. Revisá el log.")
+else:
+    st.info("🔹 Subí y organizá tus fotos antes de aplicar el suavizado.")
 
 # ------------------------
 # Logging panel and download
@@ -552,3 +673,4 @@ if log_content:
 # ------------------------
 # End of script
 # ------------------------
+
